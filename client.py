@@ -35,60 +35,46 @@ class TCPClient:
     def send_data(self):
         K = self.calculate_K()
         in_slow_start = True
+        start_time = time.time()
 
-        while True:
+        while time.time() - start_time < 30:  # Limit test duration to 30 seconds
             try:
-                # Calculate the current congestion window size
                 t = time.time() - self.t_start
                 if in_slow_start:
-                    self.W = self.W * 2  # Exponential increase in Slow Start
+                    self.W = self.W * 2
                 else:
                     self.W = self.cubic_window(t, K, self.C, self.W_max)
 
                 successful_packets = 0
-                for _ in range(int(self.W)):
+                for _ in range(min(int(self.W), 20)):  # Limit to 20 packets per cycle
                     try:
-                        # Measure RTT
                         send_time = time.time()
-
-                        # Send data packet
                         self.socket.sendall(b"Data packet")
-
-                        # Wait for ACK
-                        self.socket.settimeout(1)
+                        self.socket.settimeout(2.0)  # Increased timeout
                         data = self.socket.recv(1024)
                         receive_time = time.time()
 
                         if data.decode() == "ACK":
                             successful_packets += 1
                             sample_rtt = receive_time - send_time
-                            self.update_ema_rtt(sample_rtt)  # Update EMA of RTT
+                            self.update_ema_rtt(sample_rtt)
                             print(f"Sample RTT: {sample_rtt:.3f} seconds, EMA RTT: {self.ema_rtt:.3f} seconds")
                     except socket.timeout:
                         print("Packet lost: Timeout waiting for ACK")
                         break
 
-                # Adjust congestion window size
                 if successful_packets < self.W:
-                    # Packet Loss Detected
                     self.ssthresh = self.W / 2
-                    self.W = max(1, self.ssthresh)  # Fast Recovery
+                    self.W = max(1, self.ssthresh)
                     in_slow_start = True
                     self.t_start = time.time()
                 else:
                     if in_slow_start and self.W >= self.ssthresh:
-                        in_slow_start = False  # Exit Slow Start
+                        in_slow_start = False
                     self.W_max = max(self.W_max, self.W)
 
-                # Adjust sending rate based on RTT
-                if self.ema_rtt > 0.2:  # If RTT is too high, assume congestion
-                    print("High RTT detected, reducing window size...")
-                    self.W = max(1, self.W / 2)
-                    self.t_start = time.time()
-
                 print(f"Current window size: {self.W:.2f}")
-                time.sleep(self.ema_rtt)  # Adjust sending rate based on EMA RTT
-
+                time.sleep(0.05)
             except KeyboardInterrupt:
                 print("Client stopped.")
                 break

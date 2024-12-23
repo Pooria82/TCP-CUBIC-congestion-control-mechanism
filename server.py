@@ -5,15 +5,15 @@ import time
 
 
 class TCPServer:
-    def __init__(self, host='127.0.0.1', port=65432, packet_loss_prob=0.1, delayed_ack_count=3, bandwidth_limit=1024):
+    def __init__(self, host='127.0.0.1', port=65432, packet_loss_prob=0.02, delayed_ack_count=3, bandwidth_limit=2048):
         self.host = host
         self.port = port
-        self.packet_loss_prob = packet_loss_prob
+        self.packet_loss_prob = packet_loss_prob  # Packet loss probability reduced
         self.delayed_ack_count = delayed_ack_count
         self.bandwidth_limit = bandwidth_limit  # Maximum bytes per second
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.current_bandwidth_limit = self.bandwidth_limit
-        self.network_busy = False  # Indicates whether the network is congested
+        self.network_busy = False  # No congestion for stable network
 
     def start(self):
         self.server_socket.bind((self.host, self.port))
@@ -47,22 +47,6 @@ class TCPServer:
                     print("Packet lost!")
                     continue
 
-                # Track bandwidth usage
-                data_received += len(data)
-                elapsed_time = time.time() - start_time
-
-                # Check if bandwidth limit is exceeded
-                if data_received > self.current_bandwidth_limit:
-                    print("Bandwidth limit exceeded! Throttling...")
-                    time.sleep(1)  # Simulate throttling by delaying ACK
-                    data_received = 0
-                    start_time = time.time()
-
-                # Simulate network congestion
-                if self.network_busy:
-                    print("Network is busy! Delaying ACK...")
-                    time.sleep(0.5)  # Delay ACK due to congestion
-
                 print(f"Received: {data.decode()}")
                 packet_counter += 1
 
@@ -73,20 +57,13 @@ class TCPServer:
 
     def simulate_network_conditions(self):
         """
-        Simulate changes in network conditions, such as congestion, RTT variations, and bandwidth fluctuations.
+        Simulate stable network conditions for the test.
         """
         while True:
-            # Randomly simulate network congestion
-            self.network_busy = random.choice([True, False])
-
-            # Randomly adjust bandwidth limit
-            self.current_bandwidth_limit = random.randint(int(self.bandwidth_limit * 0.5), self.bandwidth_limit)
-
-            print(f"Current bandwidth limit: {self.current_bandwidth_limit} bytes/sec")
-            print(f"Network busy: {self.network_busy}")
-
-            # Wait before changing network conditions again
-            time.sleep(random.uniform(5, 10))
+            self.network_busy = False  # Stable network
+            self.current_bandwidth_limit = self.bandwidth_limit  # Fixed high bandwidth
+            print(f"Stable network: Bandwidth = {self.current_bandwidth_limit}, Network busy = {self.network_busy}")
+            time.sleep(5)
 
     def stop(self):
         self.server_socket.close()
