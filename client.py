@@ -35,22 +35,30 @@ class TCPClient:
     def send_data(self):
         K = self.calculate_K()
         in_slow_start = True
+        in_fast_recovery = False  # Track Fast Recovery state
         start_time = time.time()
 
-        while time.time() - start_time < 30:  # Limit test duration to 30 seconds
+        while time.time() - start_time < 30:  # Stop after 30 seconds
             try:
                 t = time.time() - self.t_start
                 if in_slow_start:
-                    self.W = self.W * 2
+                    self.W = min(self.W * 2, self.ssthresh)  # Exponential increase in Slow Start
+                elif in_fast_recovery:
+                    self.W += 1  # Linear increase during Fast Recovery
+                    print("Fast Recovery: Increasing window linearly.")
                 else:
                     self.W = self.cubic_window(t, K, self.C, self.W_max)
 
                 successful_packets = 0
-                for _ in range(min(int(self.W), 20)):  # Limit to 20 packets per cycle
+                for _ in range(int(self.W)):
                     try:
                         send_time = time.time()
+
+                        # Send data packet
                         self.socket.sendall(b"Data packet")
-                        self.socket.settimeout(2.0)  # Increased timeout
+
+                        # Wait for ACK
+                        self.socket.settimeout(1)
                         data = self.socket.recv(1024)
                         receive_time = time.time()
 
@@ -61,23 +69,29 @@ class TCPClient:
                             print(f"Sample RTT: {sample_rtt:.3f} seconds, EMA RTT: {self.ema_rtt:.3f} seconds")
                     except socket.timeout:
                         print("Packet lost: Timeout waiting for ACK")
+                        in_fast_recovery = True  # Enter Fast Recovery mode
                         break
 
                 if successful_packets < self.W:
-                    self.ssthresh = self.W / 2
+                    self.ssthresh = max(1, self.W / 2)
                     self.W = max(1, self.ssthresh)
-                    in_slow_start = True
+                    in_slow_start = False
+                    in_fast_recovery = True  # Transition to Fast Recovery
                     self.t_start = time.time()
+                    print("Fast Recovery: Reducing window size.")
                 else:
+                    in_fast_recovery = False  # Exit Fast Recovery
                     if in_slow_start and self.W >= self.ssthresh:
                         in_slow_start = False
                     self.W_max = max(self.W_max, self.W)
 
                 print(f"Current window size: {self.W:.2f}")
-                time.sleep(0.05)
+                time.sleep(self.ema_rtt)
             except KeyboardInterrupt:
                 print("Client stopped.")
                 break
+
+        print("Client finished sending data.")
 
     def disconnect(self):
         self.socket.close()

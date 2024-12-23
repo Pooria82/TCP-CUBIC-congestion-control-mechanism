@@ -1,0 +1,225 @@
+for test 1:
+server:
+import socket
+import threading
+import random
+import time
+import os
+
+
+class TCPServer:
+    def __init__(self, host='127.0.0.1', port=65432):
+        self.host = host
+        self.port = port
+        self.packet_loss_prob = float(os.getenv("PACKET_LOSS_PROB", 0.1))  # Default: 10% packet loss
+        self.delayed_ack_count = int(os.getenv("DELAYED_ACK_COUNT", 3))  # Default: 3 packets per ACK
+        self.bandwidth_limit = int(os.getenv("BANDWIDTH_LIMIT", 1024))  # Default: 1 KB/s
+        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.current_bandwidth_limit = self.bandwidth_limit
+        self.network_busy = False
+
+    def start(self):
+        self.server_socket.bind((self.host, self.port))
+        self.server_socket.listen()
+        print(f"Server is listening on {self.host}:{self.port}")
+
+        # Start network simulation in a separate thread
+        network_thread = threading.Thread(target=self.simulate_network_conditions, daemon=True)
+        network_thread.start()
+
+        while True:
+            conn, addr = self.server_socket.accept()
+            print(f"Connected by {addr}")
+            thread = threading.Thread(target=self.handle_client, args=(conn,))
+            thread.start()
+
+    def handle_client(self, conn):
+        try:
+            with conn:
+                packet_counter = 0
+                data_received = 0
+                start_time = time.time()
+
+                while True:
+                    try:
+                        data = conn.recv(1024)
+                        if not data:
+                            break
+
+                        # Simulate packet loss
+                        if random.random() < self.packet_loss_prob:
+                            print("Packet lost!")
+                            continue
+
+                        # Track bandwidth usage
+                        data_received += len(data)
+                        elapsed_time = time.time() - start_time
+
+                        # Check if bandwidth limit is exceeded
+                        if data_received > self.current_bandwidth_limit:
+                            print("Bandwidth limit exceeded! Throttling...")
+                            time.sleep(1)  # Simulate throttling by delaying ACK
+                            data_received = 0
+                            start_time = time.time()
+
+                        # Simulate network congestion
+                        if self.network_busy:
+                            print("Network is busy! Delaying ACK...")
+                            time.sleep(0.5)  # Delay ACK due to congestion
+
+                        print(f"Received: {data.decode()}")
+                        packet_counter += 1
+
+                        # Send ACK only after delayed_ack_count packets
+                        if packet_counter >= self.delayed_ack_count:
+                            conn.sendall(b"ACK")
+                            packet_counter = 0
+
+                    except ConnectionResetError:
+                        print("Client disconnected unexpectedly.")
+                        break
+        finally:
+            print("Closing connection.")
+            conn.close()
+
+    def simulate_network_conditions(self):
+        """
+        Simulate network congestion and bandwidth changes.
+        """
+        while True:
+            # Randomly toggle network busy state
+            self.network_busy = random.choice([True, False])
+
+            # Adjust bandwidth dynamically
+            self.current_bandwidth_limit = random.randint(
+                int(self.bandwidth_limit * 0.8), self.bandwidth_limit
+            )
+
+            print(f"Current bandwidth limit: {self.current_bandwidth_limit} bytes/sec")
+            print(f"Network busy: {self.network_busy}")
+
+            time.sleep(10)  # Update network conditions every 10 seconds
+
+    def stop(self):
+        self.server_socket.close()
+
+
+if __name__ == "__main__":
+    server = TCPServer()
+    try:
+        server.start()
+    except KeyboardInterrupt:
+        print("Server shutting down.")
+        server.stop()
+
+
+
+client:
+import socket
+import time
+
+
+class TCPClient:
+    def __init__(self, host='127.0.0.1', port=65432):
+        self.host = host
+        self.port = port
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.C = 0.4  # CUBIC constant
+        self.W_max = 10  # Maximum congestion window
+        self.W = 1  # Initial congestion window
+        self.ssthresh = 5  # Slow Start threshold
+        self.rtt = 0.1  # Default RTT
+        self.ema_rtt = 0.1  # Exponential Moving Average for RTT
+        self.alpha = 0.125  # EMA coefficient
+        self.t_start = time.time()
+
+    def connect(self):
+        self.socket.connect((self.host, self.port))
+        print(f"Connected to server at {self.host}:{self.port}")
+
+    def cubic_window(self, t, K, C, W_max):
+        return C * (t - K) ** 3 + W_max
+
+    def calculate_K(self):
+        return (self.W_max / self.C) ** (1 / 3)
+
+    def update_ema_rtt(self, sample_rtt):
+        """
+        Update the Exponential Moving Average (EMA) of RTT.
+        """
+        self.ema_rtt = (1 - self.alpha) * self.ema_rtt + self.alpha * sample_rtt
+
+    def send_data(self):
+        K = self.calculate_K()
+        in_slow_start = True
+        in_fast_recovery = False  # Track Fast Recovery state
+        start_time = time.time()
+
+        while time.time() - start_time < 30:  # Stop after 30 seconds
+            try:
+                t = time.time() - self.t_start
+                if in_slow_start:
+                    self.W = min(self.W * 2, self.ssthresh)  # Exponential increase in Slow Start
+                elif in_fast_recovery:
+                    self.W += 1  # Linear increase during Fast Recovery
+                    print("Fast Recovery: Increasing window linearly.")
+                else:
+                    self.W = self.cubic_window(t, K, self.C, self.W_max)
+
+                successful_packets = 0
+                for _ in range(int(self.W)):
+                    try:
+                        send_time = time.time()
+
+                        # Send data packet
+                        self.socket.sendall(b"Data packet")
+
+                        # Wait for ACK
+                        self.socket.settimeout(1)
+                        data = self.socket.recv(1024)
+                        receive_time = time.time()
+
+                        if data.decode() == "ACK":
+                            successful_packets += 1
+                            sample_rtt = receive_time - send_time
+                            self.update_ema_rtt(sample_rtt)
+                            print(f"Sample RTT: {sample_rtt:.3f} seconds, EMA RTT: {self.ema_rtt:.3f} seconds")
+                    except socket.timeout:
+                        print("Packet lost: Timeout waiting for ACK")
+                        in_fast_recovery = True  # Enter Fast Recovery mode
+                        break
+
+                if successful_packets < self.W:
+                    self.ssthresh = max(1, self.W / 2)
+                    self.W = max(1, self.ssthresh)
+                    in_slow_start = False
+                    in_fast_recovery = True  # Transition to Fast Recovery
+                    self.t_start = time.time()
+                    print("Fast Recovery: Reducing window size.")
+                else:
+                    in_fast_recovery = False  # Exit Fast Recovery
+                    if in_slow_start and self.W >= self.ssthresh:
+                        in_slow_start = False
+                    self.W_max = max(self.W_max, self.W)
+
+                print(f"Current window size: {self.W:.2f}")
+                time.sleep(self.ema_rtt)
+            except KeyboardInterrupt:
+                print("Client stopped.")
+                break
+
+        print("Client finished sending data.")
+
+    def disconnect(self):
+        self.socket.close()
+
+
+if __name__ == "__main__":
+    client = TCPClient()
+    try:
+        client.connect()
+        client.send_data()
+    except KeyboardInterrupt:
+        client.disconnect()
+
+------------------------------------------------------------------------------------------------------------------------

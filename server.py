@@ -2,28 +2,28 @@ import socket
 import threading
 import random
 import time
+import os
 
 
 class TCPServer:
-    def __init__(self, host='127.0.0.1', port=65432, packet_loss_prob=0.02, delayed_ack_count=3, bandwidth_limit=2048):
+    def __init__(self, host='127.0.0.1', port=65432):
         self.host = host
         self.port = port
-        self.packet_loss_prob = packet_loss_prob  # Packet loss probability reduced
-        self.delayed_ack_count = delayed_ack_count
-        self.bandwidth_limit = bandwidth_limit  # Maximum bytes per second
+        self.packet_loss_prob = float(os.getenv("PACKET_LOSS_PROB", 0.1))  # Default: 10% packet loss
+        self.delayed_ack_count = int(os.getenv("DELAYED_ACK_COUNT", 3))  # Default: 3 packets per ACK
+        self.bandwidth_limit = int(os.getenv("BANDWIDTH_LIMIT", 1024))  # Default: 1 KB/s
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.current_bandwidth_limit = self.bandwidth_limit
-        self.network_busy = False  # No congestion for stable network
+        self.network_busy = False
 
     def start(self):
         self.server_socket.bind((self.host, self.port))
         self.server_socket.listen()
         print(f"Server is listening on {self.host}:{self.port}")
 
-        # Start a thread to simulate network conditions
-        network_simulation_thread = threading.Thread(target=self.simulate_network_conditions)
-        network_simulation_thread.daemon = True
-        network_simulation_thread.start()
+        # Start network simulation in a separate thread
+        network_thread = threading.Thread(target=self.simulate_network_conditions, daemon=True)
+        network_thread.start()
 
         while True:
             conn, addr = self.server_socket.accept()
@@ -32,38 +32,71 @@ class TCPServer:
             thread.start()
 
     def handle_client(self, conn):
-        with conn:
-            packet_counter = 0
-            data_received = 0
-            start_time = time.time()
+        try:
+            with conn:
+                packet_counter = 0
+                data_received = 0
+                start_time = time.time()
 
-            while True:
-                data = conn.recv(1024)
-                if not data:
-                    break
+                while True:
+                    try:
+                        data = conn.recv(1024)
+                        if not data:
+                            break
 
-                # Simulate packet loss
-                if random.random() < self.packet_loss_prob:
-                    print("Packet lost!")
-                    continue
+                        # Simulate packet loss
+                        if random.random() < self.packet_loss_prob:
+                            print("Packet lost!")
+                            continue
 
-                print(f"Received: {data.decode()}")
-                packet_counter += 1
+                        # Track bandwidth usage
+                        data_received += len(data)
+                        elapsed_time = time.time() - start_time
 
-                # Send ACK only after delayed_ack_count packets
-                if packet_counter >= self.delayed_ack_count:
-                    conn.sendall(b"ACK")
-                    packet_counter = 0
+                        # Check if bandwidth limit is exceeded
+                        if data_received > self.current_bandwidth_limit:
+                            print("Bandwidth limit exceeded! Throttling...")
+                            time.sleep(1)  # Simulate throttling by delaying ACK
+                            data_received = 0
+                            start_time = time.time()
+
+                        # Simulate network congestion
+                        if self.network_busy:
+                            print("Network is busy! Delaying ACK...")
+                            time.sleep(0.5)  # Delay ACK due to congestion
+
+                        print(f"Received: {data.decode()}")
+                        packet_counter += 1
+
+                        # Send ACK only after delayed_ack_count packets
+                        if packet_counter >= self.delayed_ack_count:
+                            conn.sendall(b"ACK")
+                            packet_counter = 0
+
+                    except ConnectionResetError:
+                        print("Client disconnected unexpectedly.")
+                        break
+        finally:
+            print("Closing connection.")
+            conn.close()
 
     def simulate_network_conditions(self):
         """
-        Simulate stable network conditions for the test.
+        Simulate network congestion and bandwidth changes.
         """
         while True:
-            self.network_busy = False  # Stable network
-            self.current_bandwidth_limit = self.bandwidth_limit  # Fixed high bandwidth
-            print(f"Stable network: Bandwidth = {self.current_bandwidth_limit}, Network busy = {self.network_busy}")
-            time.sleep(5)
+            # Randomly toggle network busy state
+            self.network_busy = random.choice([True, False])
+
+            # Adjust bandwidth dynamically
+            self.current_bandwidth_limit = random.randint(
+                int(self.bandwidth_limit * 0.8), self.bandwidth_limit
+            )
+
+            print(f"Current bandwidth limit: {self.current_bandwidth_limit} bytes/sec")
+            print(f"Network busy: {self.network_busy}")
+
+            time.sleep(10)  # Update network conditions every 10 seconds
 
     def stop(self):
         self.server_socket.close()
@@ -74,5 +107,5 @@ if __name__ == "__main__":
     try:
         server.start()
     except KeyboardInterrupt:
-        print("Server stopped.")
+        print("Server shutting down.")
         server.stop()
