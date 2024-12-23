@@ -13,15 +13,17 @@ class TestHighPacketLoss(unittest.TestCase):
             ["python", self.server_path],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            env=env
+            env=env,
+            text=True,
+            bufsize=1  # Line-buffered output
         )
-        time.sleep(1)
+        time.sleep(1)  # Wait for the server to start
 
     def tearDown(self):
         self.server_process.terminate()
         stdout, stderr = self.server_process.communicate()
-        print("\nServer Output:\n", stdout.decode("utf-8"))
-        print("\nServer Errors:\n", stderr.decode("utf-8"))
+        print("\nServer Output:\n", stdout)
+        print("\nServer Errors:\n", stderr)
         self.server_process.wait()
 
     def test_high_packet_loss(self):
@@ -30,17 +32,28 @@ class TestHighPacketLoss(unittest.TestCase):
             client_process = subprocess.Popen(
                 ["python", client_path],
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1  # Line-buffered output
             )
-            stdout, _ = client_process.communicate(timeout=35)
+
+            # Process client output in real-time
+            client_output = []
+            for line in iter(client_process.stdout.readline, ''):
+                print(line.strip())  # Real-time output
+                client_output.append(line.strip())  # Save output for later assertions
+
+            client_process.stdout.close()
+            client_process.wait(timeout=35)
         except subprocess.TimeoutExpired:
             client_process.kill()
             self.fail("Client process timed out.")
-
-        output = stdout.decode("utf-8")
-        print("\nClient Output:\n", output)
+        except Exception as e:
+            client_process.kill()
+            raise e
 
         # Assertions to ensure correct behavior
+        output = "\n".join(client_output)  # Combine output lines for assertion
         self.assertIn("Packet lost", output, "Client should detect packet loss.")
         self.assertIn("Fast Recovery", output, "Client should enter Fast Recovery mode.")
         self.assertLess(

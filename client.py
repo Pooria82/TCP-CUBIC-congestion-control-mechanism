@@ -14,6 +14,7 @@ class TCPClient:
         self.rtt = 0.1  # Default RTT
         self.ema_rtt = 0.1  # Exponential Moving Average for RTT
         self.alpha = 0.125  # EMA coefficient
+        self.high_rtt_threshold = 0.3  # RTT threshold for detection
         self.t_start = time.time()
 
     def connect(self):
@@ -28,9 +29,11 @@ class TCPClient:
 
     def update_ema_rtt(self, sample_rtt):
         """
-        Update the Exponential Moving Average (EMA) of RTT.
+        Update the Exponential Moving Average (EMA) of RTT and check for high RTT.
         """
         self.ema_rtt = (1 - self.alpha) * self.ema_rtt + self.alpha * sample_rtt
+        if self.ema_rtt > self.high_rtt_threshold:
+            print(f"High RTT detected: EMA RTT = {self.ema_rtt:.3f} seconds")
 
     def send_data(self):
         K = self.calculate_K()
@@ -84,6 +87,11 @@ class TCPClient:
                     if in_slow_start and self.W >= self.ssthresh:
                         in_slow_start = False
                     self.W_max = max(self.W_max, self.W)
+
+                if self.ema_rtt > self.high_rtt_threshold:
+                    print("High RTT detected, reducing window size...")
+                    self.W = max(1, self.W / 2)
+                    self.t_start = time.time()
 
                 print(f"Current window size: {self.W:.2f}")
                 time.sleep(self.ema_rtt)
