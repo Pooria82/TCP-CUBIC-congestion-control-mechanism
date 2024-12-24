@@ -1,0 +1,47 @@
+\documentclass[tikz,border=3.14mm]{standalone}
+\usetikzlibrary{automata, positioning}
+
+\begin{document}
+
+\begin{tikzpicture}[shorten >=1pt, node distance=8cm and 12cm, on grid, auto]
+    % Define states
+    \node[state, initial] (slowstart)   {Slow Start \\ ($W = 1$, $W \times 2$)};
+    \node[state]           (avoidance)  [right=of slowstart, xshift=5cm] {Congestion Avoidance \\ ($W$ increases \\ gradually)};
+    \node[state]           (fastrecovery) [below left=of slowstart, yshift=-3cm, xshift=-2cm] {Fast Recovery \\ ($W = ssthresh / 2$)};
+    \node[state]           (recoveredboth) [below right=of fastrecovery, yshift=-3cm, xshift=2cm] {Recovered Both \\ (Normal Operation)};
+    \node[state]           (highrtt)    [below right=of avoidance, xshift=3cm, yshift=-3cm] {High RTT \\ Detected \\ (Reduce $W$)};
+    \node[state]           (bandwidthlimit) [below=of avoidance, yshift=-5cm] {Bandwidth Limit \\ Detected \\ ($W$ reduction)};
+    \node[state]           (combinedscenario) [below=of bandwidthlimit, yshift=-5cm, xshift=-2cm] {High RTT \\ + \\ Bandwidth Limit};
+
+    % Define transitions
+    \path[->]
+        % Slow Start transitions
+        (slowstart) edge[bend left=20] node[above, yshift=0.2cm] {Packet Loss \\ or $W \geq ssthresh$} (avoidance)
+        (slowstart) edge[loop above] node {Exponential \\ Increase \\ ($W \times 2$)} ()
+
+        % Congestion Avoidance transitions
+        (avoidance) edge[bend left=20] node[right, xshift=0.2cm] {Packet Loss \\ Detected} (fastrecovery)
+        (avoidance) edge[loop above] node {Increase \\ Gradually \\ (Cubic Function)} ()
+        (avoidance) edge[bend right=40] node[right, xshift=0.5cm, yshift=-0.2cm] {Bandwidth \\ Limit Exceeded} (bandwidthlimit)
+        (avoidance) edge[bend left=30] node[above, xshift=1cm] {EMA RTT \\ Exceeds Threshold} (highrtt)
+
+        % High RTT transitions
+        (highrtt) edge[bend left=30] node[above, xshift=-0.2cm, yshift=0.2cm] {Recovered RTT \\ (EMA RTT Stable)} (avoidance)
+        (highrtt) edge[bend left=30] node[right, xshift=0.2cm, yshift=-0.5cm] {Detected \\ Bandwidth Limit} (combinedscenario)
+
+        % Bandwidth Limit transitions
+        (bandwidthlimit) edge[bend right=30] node[above, xshift=-0.2cm, yshift=0.2cm] {Recovered Bandwidth \\ (Normal Limit)} (avoidance)
+        (bandwidthlimit) edge[bend left=20] node[below, xshift=-0.2cm, yshift=-0.2cm] {Detected \\ High RTT} (combinedscenario)
+
+        % Combined Scenario transitions
+        (combinedscenario) edge[bend left=30] node[below, xshift=-0.5cm, yshift=-0.2cm] {Recovered Both \\ (Normal Operation)} (recoveredboth)
+
+        % Recovered Both transitions
+        (recoveredboth) edge[bend left=20] node[below, xshift=-0.2cm, yshift=-0.5cm] {Normal \\ Operation Restored} (avoidance)
+
+        % Fast Recovery transitions
+        (fastrecovery) edge[bend left=20] node[left, xshift=-0.2cm] {Timeout \\ or Success} (slowstart)
+        (fastrecovery) edge[loop below] node {Recovering \\ from Loss} ();
+\end{tikzpicture}
+
+\end{document}
