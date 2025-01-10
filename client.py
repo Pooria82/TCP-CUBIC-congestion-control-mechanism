@@ -28,39 +28,40 @@ class TCPClient:
         return (self.W_max / self.C) ** (1 / 3)
 
     def update_ema_rtt(self, sample_rtt):
-        """
-        Update the Exponential Moving Average (EMA) of RTT and check for high RTT.
-        """
         self.ema_rtt = (1 - self.alpha) * self.ema_rtt + self.alpha * sample_rtt
-        if self.ema_rtt > self.high_rtt_threshold:
-            print(f"High RTT detected: EMA RTT = {self.ema_rtt:.3f} seconds")
+        print(f"Updated EMA RTT: {self.ema_rtt:.3f} seconds")
+
+    def print_parameters(self):
+        print(f"\n=== Current CUBIC Parameters ===")
+        print(f"Congestion Window (W): {self.W}")
+        print(f"RTT: {self.rtt}")
+        print(f"EMA RTT: {self.ema_rtt}")
+        print(f"ssthresh: {self.ssthresh}")
+        print(f"C: {self.C}, W_max: {self.W_max}")
 
     def send_data(self):
         K = self.calculate_K()
         in_slow_start = True
-        in_fast_recovery = False  # Track Fast Recovery state
+        in_fast_recovery = False
         start_time = time.time()
 
-        while time.time() - start_time < 30:  # Stop after 30 seconds
+        while time.time() - start_time < 30:
             try:
                 t = time.time() - self.t_start
                 if in_slow_start:
-                    self.W = min(self.W * 2, self.ssthresh)  # Exponential increase in Slow Start
+                    self.W = min(self.W * 2, self.ssthresh)
                 elif in_fast_recovery:
-                    self.W += 1  # Linear increase during Fast Recovery
-                    print("Fast Recovery: Increasing window linearly.")
+                    self.W += 1
                 else:
                     self.W = self.cubic_window(t, K, self.C, self.W_max)
+
+                self.print_parameters()
 
                 successful_packets = 0
                 for _ in range(int(self.W)):
                     try:
                         send_time = time.time()
-
-                        # Send data packet
                         self.socket.sendall(b"Data packet")
-
-                        # Wait for ACK
                         self.socket.settimeout(1)
                         data = self.socket.recv(1024)
                         receive_time = time.time()
@@ -69,21 +70,19 @@ class TCPClient:
                             successful_packets += 1
                             sample_rtt = receive_time - send_time
                             self.update_ema_rtt(sample_rtt)
-                            print(f"Sample RTT: {sample_rtt:.3f} seconds, EMA RTT: {self.ema_rtt:.3f} seconds")
                     except socket.timeout:
                         print("Packet lost: Timeout waiting for ACK")
-                        in_fast_recovery = True  # Enter Fast Recovery mode
+                        in_fast_recovery = True
                         break
 
                 if successful_packets < self.W:
                     self.ssthresh = max(1, self.W / 2)
                     self.W = max(1, self.ssthresh)
                     in_slow_start = False
-                    in_fast_recovery = True  # Transition to Fast Recovery
+                    in_fast_recovery = True
                     self.t_start = time.time()
-                    print("Fast Recovery: Reducing window size.")
                 else:
-                    in_fast_recovery = False  # Exit Fast Recovery
+                    in_fast_recovery = False
                     if in_slow_start and self.W >= self.ssthresh:
                         in_slow_start = False
                     self.W_max = max(self.W_max, self.W)
@@ -98,8 +97,6 @@ class TCPClient:
             except KeyboardInterrupt:
                 print("Client stopped.")
                 break
-
-        print("Client finished sending data.")
 
     def disconnect(self):
         self.socket.close()
